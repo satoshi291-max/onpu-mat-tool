@@ -604,22 +604,34 @@ function getActx() {
   if (!_actx) _actx = new (window.AudioContext||window.webkitAudioContext)();
   return _actx;
 }
-// オルゴール音：短いping、伸びない
+// オルゴール音：sine基音 + 2倍音ピン
 function playNote(pitch) {
   if (!pitch) return;
   try {
     const ctx = getActx();
     const f = FREQ[norm(pitch)];
     if (!f) return;
-    const osc  = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain); gain.connect(ctx.destination);
-    osc.type = 'triangle';
-    osc.frequency.value = f;
     const now = ctx.currentTime;
-    gain.gain.setValueAtTime(0.4, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-    osc.start(now); osc.stop(now + 0.32);
+
+    // 基音：sine波、1.2秒かけてフェードアウト
+    const osc1 = ctx.createOscillator();
+    const g1   = ctx.createGain();
+    osc1.connect(g1); g1.connect(ctx.destination);
+    osc1.type = 'sine';
+    osc1.frequency.value = f;
+    g1.gain.setValueAtTime(0.5, now);
+    g1.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
+    osc1.start(now); osc1.stop(now + 1.25);
+
+    // 2倍音：短い「ピン」感（0.15秒で消える）
+    const osc2 = ctx.createOscillator();
+    const g2   = ctx.createGain();
+    osc2.connect(g2); g2.connect(ctx.destination);
+    osc2.type = 'sine';
+    osc2.frequency.value = f * 2;
+    g2.gain.setValueAtTime(0.18, now);
+    g2.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    osc2.start(now); osc2.stop(now + 0.18);
   } catch(e){}
 }
 
