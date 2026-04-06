@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>音符マット配置ツール</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --bg:#08080f;--surf:#111122;--card:#18182e;--border:#26264a;
+  --accent:#7c4dff;--gold:#ffd700;--text:#eee;--muted:#777;
+  --cell:44px;   /* 全タイル共通サイズ */
+}
+body{background:var(--bg);color:var(--text);font-family:'Noto Sans JP','Segoe UI',sans-serif;
+  height:100dvh;display:flex;flex-direction:column;overflow:hidden;}
+
+/* ── HEADER ── */
+#hdr{background:var(--surf);border-bottom:1px solid var(--border);
+  padding:8px 12px 10px;flex-shrink:0;}
+#hdr h1{font-size:.9rem;font-weight:800;
+  background:linear-gradient(90deg,#7c4dff,#e040fb);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;margin-bottom:8px;}
+.row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;}
+.ctrl{display:flex;flex-direction:column;gap:2px;}
+.lbl{font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
+select{background:var(--card);border:1px solid var(--border);border-radius:6px;
+  color:var(--text);padding:5px 7px;font-size:.78rem;width:100%;}
+select option{background:var(--card);}
+.mode-btns{display:flex;gap:4px;}
+.mode-btn{flex:1;padding:5px 4px;background:var(--card);border:1.5px solid var(--border);
+  border-radius:6px;color:var(--muted);font-size:.72rem;font-weight:700;cursor:pointer;
+  text-align:center;transition:.15s;}
+.mode-btn.active{border-color:var(--accent);background:#2a1a5e;color:#fff;}
+.mode-btn.active.m-gachi{border-color:#e040fb;background:#2a1040;}
+.mode-btn.active.m-sugachi{border-color:var(--gold);background:#1a1400;}
+.dir-btns{display:flex;gap:3px;}
+.dir-btn{flex:1;padding:4px 2px;background:var(--card);border:1.5px solid var(--border);
+  border-radius:5px;color:var(--muted);font-size:.7rem;cursor:pointer;text-align:center;}
+.dir-btn.active{border-color:#3498db;color:#3498db;background:#0a1a2a;}
+#stats{font-size:.65rem;color:var(--muted);display:flex;gap:10px;}
+#stats b{color:var(--text);}
+
+/* ── MAP AREA ── */
+#map{flex:1;overflow-y:auto;overflow-x:hidden;padding:12px 8px 24px;
+  display:flex;flex-direction:column;align-items:center;
+  -webkit-overflow-scrolling:touch;position:relative;}
+#map::-webkit-scrollbar{width:3px;}
+#map::-webkit-scrollbar-thumb{background:var(--accent);border-radius:2px;}
+#empty{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  flex:1;color:var(--muted);gap:8px;font-size:.85rem;}
+#empty .ico{font-size:2.5rem;}
+
+/* ── SUMMARY ── */
+#summary{width:100%;max-width:280px;background:var(--surf);
+  border:1px solid var(--border);border-radius:10px;padding:9px 12px;margin-bottom:10px;}
+#summary h3{font-size:.62rem;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.05em;margin-bottom:7px;}
+.chips{display:flex;flex-wrap:wrap;gap:5px;}
+.chip{display:flex;align-items:center;gap:4px;padding:3px 9px;
+  border-radius:14px;font-size:.72rem;font-weight:700;border:1.5px solid;}
+.chip-dot{width:7px;height:7px;border-radius:50%;}
+
+/* ── BOOKMARKS ── */
+.bmark{display:flex;align-items:center;gap:8px;padding:6px 14px;
+  border-radius:18px;font-size:.78rem;font-weight:700;margin:4px 0;}
+.bmark.goal{background:#0a2a0a;border:2px solid #2ecc71;color:#2ecc71;}
+.bmark.start{background:#0a0a2a;border:2px solid var(--accent);color:#aaa;}
+
+/* ══════════════════════════════
+   GRID MAP  — 7列すべてvar(--cell)の正方形
+   列: extraL | farL | closeL | TRACK | closeR | farR | extraR
+   ══════════════════════════════ */
+#mapcol{display:flex;flex-direction:column;align-items:center;width:100%;}
+
+/* ── 共通グリッド行 ── */
+.map-row{
+  display:grid;
+  grid-template-columns:repeat(7, var(--cell));
+  width:calc(7 * var(--cell));
+  height:var(--cell);
+  align-items:stretch;
+}
+
+/* 線路セル（col 4） */
+.tc{
+  grid-column:4;
+  background:repeating-linear-gradient(
+    to bottom,
+    #2a2a3a 0px, #2a2a3a 4px,
+    #444 4px, #444 var(--cell)
+  );
+  border-left:5px solid #666;border-right:5px solid #666;
+}
+
+/* ── マットタイル（共通） ── */
+.mt{
+  width:var(--cell);height:var(--cell);
+  border-radius:6px;
+  display:flex;align-items:center;justify-content:center;
+  border:2px solid rgba(255,255,255,.2);
+  flex-shrink:0;
+  transition:filter .15s;
+}
+.mt .nsym{
+  font-size:1.6rem;line-height:1;color:#fff;
+  text-shadow:0 1px 4px rgba(0,0,0,.8);
+  display:block;
+}
+
+/* センサータイル */
+.sdot{
+  width:var(--cell);height:var(--cell);
+  border-radius:6px;
+  border:3px solid var(--gold);background:rgba(255,215,0,.12);
+  display:flex;align-items:center;justify-content:center;
+  font-size:.5rem;color:var(--gold);font-weight:800;
+  flex-shrink:0;
+}
+
+/* センサー通過時のフラッシュ */
+.mat-flash{
+  filter:brightness(2.5) saturate(1.6)!important;
+  box-shadow:0 0 10px 4px rgba(255,255,255,.6)!important;
+  transition:filter .04s,box-shadow .04s;
+}
+
+/* ── EASY MODE ── */
+/* easy-row: マットあり行, easy-gap: 空き行（休符・間隔） */
+.easy-row,.easy-gap{
+  width:var(--cell);height:var(--cell);
+  position:relative;
+  display:flex;align-items:center;justify-content:center;
+}
+/* 線路ライン（中央縦線） */
+.easy-row::before,.easy-gap::before{
+  content:'';position:absolute;
+  top:0;bottom:0;left:50%;
+  width:6px;background:#3a3a4a;
+  transform:translateX(-50%);
+  border-left:2px solid #666;border-right:2px solid #666;
+}
+.easy-mat{
+  width:var(--cell);height:var(--cell);
+  border-radius:6px;
+  display:flex;align-items:center;justify-content:center;
+  border:2px solid rgba(255,255,255,.2);
+  position:relative;z-index:1;
+  flex-shrink:0;
+  transition:filter .15s;
+}
+.easy-mat .nsym{
+  font-size:1.6rem;line-height:1;color:#fff;
+  text-shadow:0 1px 4px rgba(0,0,0,.8);display:block;
+}
+
+/* trigger line overlay on #map */
+#trigger-line{
+  position:absolute;left:0;right:0;top:50%;
+  height:2px;background:rgba(124,77,255,.35);
+  pointer-events:none;z-index:20;
+}
+#trigger-line::after{
+  content:'▶';position:absolute;right:8px;top:-8px;
+  font-size:.6rem;color:rgba(124,77,255,.6);
+}
+
+/* ── LEGEND ── */
+#legend-toggle{position:fixed;bottom:16px;right:16px;
+  width:42px;height:42px;border-radius:50%;
+  background:var(--accent);border:none;color:#fff;
+  font-size:1.1rem;cursor:pointer;z-index:100;
+  box-shadow:0 2px 12px rgba(0,0,0,.5);}
+#legend{position:fixed;bottom:70px;right:16px;
+  background:var(--surf);border:1px solid var(--border);
+  border-radius:12px;padding:12px;font-size:.72rem;
+  z-index:99;display:none;min-width:180px;}
+#legend h4{margin-bottom:8px;font-size:.68rem;
+  color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
+.legend-item{display:flex;align-items:center;gap:6px;margin-bottom:5px;}
+.l-swatch{width:14px;height:14px;border-radius:3px;flex-shrink:0;}
+
+/* ── COLUMN HEADER ── */
+.col-hdr{
+  width:calc(7 * var(--cell));
+  display:grid;
+  grid-template-columns:repeat(7, var(--cell));
+  margin-bottom:2px;
+}
+.col-hdr span{font-size:.5rem;color:#555;text-align:center;overflow:hidden;line-height:1.4;}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div id="hdr">
+  <h1>🎵 音符マット配置ツール</h1>
+  <div class="row">
+    <div class="ctrl" style="flex:1;min-width:130px">
+      <span class="lbl">カテゴリ</span>
+      <select id="catSel" onchange="onCat()">
+        <option value="">── カテゴリ ──</option>
+        <option value="kids">🧒 キッズ</option>
+        <option value="marine">⚓ 宝鐘マリン</option>
+        <option value="azki">🎤 AZKi</option>
+        <option value="okayu">🐱 猫又おかゆ</option>
+        <option value="hololive">🌸 ホロライブ</option>
+        <option value="other">🎵 その他</option>
+      </select>
+    </div>
+    <div class="ctrl" style="flex:1;min-width:130px">
+      <span class="lbl">曲</span>
+      <select id="songSel" onchange="onSong()">
+        <option value="">── 曲を選ぶ ──</option>
+      </select>
+    </div>
+  </div>
+  <div class="row">
+    <div class="ctrl" style="flex:1">
+      <span class="lbl">演奏モード</span>
+      <div class="mode-btns">
+        <div class="mode-btn active" data-mode="easy" onclick="setMode('easy')">簡単<br><span style="font-size:.6rem;font-weight:400">1音/歩</span></div>
+        <div class="mode-btn m-gachi" data-mode="gachi" onclick="setMode('gachi')">ガチ<br><span style="font-size:.6rem;font-weight:400">3音/センサー</span></div>
+        <div class="mode-btn m-sugachi" data-mode="sugachi" onclick="setMode('sugachi')">超ガチ<br><span style="font-size:.6rem;font-weight:400">6音/2層</span></div>
+      </div>
+    </div>
+    <div class="ctrl" style="width:90px">
+      <span class="lbl">線路の向き</span>
+      <div class="dir-btns">
+        <div class="dir-btn active" data-dir="north" onclick="setDir('north')">北</div>
+        <div class="dir-btn" data-dir="south" onclick="setDir('south')">南</div>
+        <div class="dir-btn" data-dir="east" onclick="setDir('east')">東</div>
+        <div class="dir-btn" data-dir="west" onclick="setDir('west')">西</div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between">
+    <div id="stats">
+      <span>ステップ: <b id="st-step">–</b></span>
+      <span>音符: <b id="st-note">–</b></span>
+      <span>センサー: <b id="st-sens">–</b></span>
+    </div>
+    <button id="play-btn" onclick="togglePlay()"
+      style="background:#2a1a5e;border:1.5px solid var(--accent);border-radius:8px;
+        color:#fff;font-size:.78rem;font-weight:700;padding:5px 12px;cursor:pointer;">
+      ▶ 再生
+    </button>
+  </div>
+</div>
+
+<!-- MAP -->
+<div id="map">
+  <div id="trigger-line"></div>
+  <div id="empty"><div class="ico">🎵</div><div>カテゴリと曲を選んでください</div></div>
+  <div id="summary" style="display:none"></div>
+  <div id="mapcol"></div>
+</div>
+
+<!-- Legend -->
+<button id="legend-toggle" onclick="toggleLegend()">♩</button>
+<div id="legend">
+  <h4>マット カラー</h4>
+  <div id="legend-mats"></div>
+  <h4 style="margin-top:10px">向きの意味</h4>
+  <div class="legend-item"><span>↓</span> 南向き = 標準音</div>
+  <div class="legend-item"><span>↑</span> 北向き = 1oct低</div>
+  <div class="legend-item"><span>←</span> 西向き = ♯（半音上）</div>
+  <div class="legend-item"><span>→</span> 東向き = 1oct低 +♯</div>
+  <h4 style="margin-top:10px">グリッド列（線路中心から）</h4>
+  <div class="legend-item"><span style="color:#aaa">①</span> 左近（センサー1番目）</div>
+  <div class="legend-item"><span style="color:#aaa">②</span> 右近（センサー2番目）</div>
+  <div class="legend-item"><span style="color:#aaa">③</span> 左遠（センサー3番目）</div>
+  <div class="legend-item"><span style="color:#aaa">④</span> 右遠（センサー4番目）</div>
+  <div class="legend-item"><span style="color:var(--gold)">◎</span> センサー位置</div>
+</div>
+
+<script>
+// =============================================
+// NOTE MAP  (pitch → mat name, direction, arrow)
+// =============================================
+const NM = {
+  'C3': {mat:'ど',  dir:'北',arrow:'↑'},
+  'C#3':{mat:'ど',  dir:'東',arrow:'→'},'DB3':{mat:'ど', dir:'東',arrow:'→'},
+  'D3': {mat:'れ',  dir:'北',arrow:'↑'},
+  'D#3':{mat:'れ',  dir:'東',arrow:'→'},'EB3':{mat:'れ', dir:'東',arrow:'→'},
+  'E3': {mat:'み',  dir:'北',arrow:'↑'},
+  'F3': {mat:'ふぁ',dir:'北',arrow:'↑'},
+  'F#3':{mat:'ふぁ',dir:'東',arrow:'→'},'GB3':{mat:'ふぁ',dir:'東',arrow:'→'},
+  'G3': {mat:'そ',  dir:'北',arrow:'↑'},
+  'G#3':{mat:'そ',  dir:'東',arrow:'→'},'AB3':{mat:'そ', dir:'東',arrow:'→'},
+  'A3': {mat:'ら',  dir:'北',arrow:'↑'},
+  'A#3':{mat:'ら',  dir:'東',arrow:'→'},'BB3':{mat:'ら', dir:'東',arrow:'→'},
+  'B3': {mat:'し',  dir:'北',arrow:'↑'},
+  'C4': {mat:'ど',  dir:'南',arrow:'↓'},
+  'C#4':{mat:'ど',  dir:'西',arrow:'←'},'DB4':{mat:'ど', dir:'西',arrow:'←'},
+  'D4': {mat:'れ',  dir:'南',arrow:'↓'},
+  'D#4':{mat:'れ',  dir:'西',arrow:'←'},'EB4':{mat:'れ', dir:'西',arrow:'←'},
+  'E4': {mat:'み',  dir:'南',arrow:'↓'},
+  'F4': {mat:'ふぁ',dir:'南',arrow:'↓'},
+  'F#4':{mat:'ふぁ',dir:'西',arrow:'←'},'GB4':{mat:'ふぁ',dir:'西',arrow:'←'},
+  'G4': {mat:'そ',  dir:'南',arrow:'↓'},
+  'G#4':{mat:'そ',  dir:'西',arrow:'←'},'AB4':{mat:'そ', dir:'西',arrow:'←'},
+  'A4': {mat:'ら',  dir:'南',arrow:'↓'},
+  'A#4':{mat:'ら',  dir:'西',arrow:'←'},'BB4':{mat:'ら', dir:'西',arrow:'←'},
+  'B4': {mat:'し',  dir:'南',arrow:'↓'},
+  'C5': {mat:'高ど',dir:'南',arrow:'↓'},
+  'C#5':{mat:'高ど',dir:'西',arrow:'←'},'DB5':{mat:'高ど',dir:'西',arrow:'←'},
+};
+const MC = {
+  'ど':'#c0392b','れ':'#d35400','み':'#c9a000',
+  'ふぁ':'#1e8449','そ':'#1a5276','ら':'#6c3483',
+  'し':'#b01060','高ど':'#7b241c',
+};
+const RELDIR = {
+  north:{南:'後ろ',北:'前',東:'右',西:'左'},
+  south:{南:'前',北:'後ろ',東:'左',西:'右'},
+  east: {南:'右',北:'左',東:'前',西:'後ろ'},
+  west: {南:'左',北:'右',東:'後ろ',西:'前'},
+};
+const MAT_ORDER = ['ど','れ','み','ふぁ','そ','ら','し','高ど'];
+
+// Sensor cycle: ①CloseL ②CloseR ③FarL ④FarR
+// Grid columns: extraL(0) | farL(1) | closeL(2) | TRACK(3) | closeR(4) | farR(5) | extraR(6)
+const SENSOR_COL = {closeL:2, closeR:4, farL:1, farR:5};
+// The "lateral" mat (away from track) for each position
+const FAR_COL    = {closeL:1, closeR:5, farL:0, farR:6};
+const POS_CYCLE  = ['closeL','closeR','farL','farR'];
+
+// =============================================
+// SONG DATA
+// =============================================
+const p = (pitch, d=1) => ({p: pitch, d});
+const r = (d=1) => ({p: null, d});
+
+const SONGS = [
+  // ─── KIDS ───
+  {
+    id:'anpanman', title:'アンパンマンのマーチ', artist:'アンパンマン', category:'kids', bpm:100,
+    // MIDIファイル解析データ（bitmidi.com 8183.mid）
+    notes:[
+      // 「なにが きみの しあわせ？」
+      p('G4',0.5),p('G4',0.5),p('G4',0.5),p('F4',0.5),p('E4',0.5),p('F4',0.5),p('G4',1),r(1),
+      // 「なにを して よろこぶ？」
+      p('G4',0.5),p('G4',0.5),p('G4',0.5),p('B4',0.5),p('C4',0.5),p('C4',1),p('A4',0.5),r(0.5),
+      // 「わからないまま おわる」
+      p('G4',0.5),p('C4',0.5),p('B4',0.5),p('A4',0.5),p('A4',0.5),p('G4',0.5),p('A4',1),p('G4',0.5),p('F4',0.5),r(1),
+      // 「そんなのは いやだ！」
+      p('G4',0.5),p('G4',0.5),p('G4',0.5),p('F4',0.5),p('E4',0.5),p('F4',0.5),p('G4',1),r(1.5),
+      // 「わすれないで ゆめを」
+      p('G4',0.5),p('G4',0.5),p('B4',0.5),p('B4',0.5),p('D4',0.5),p('D4',1),r(1),
+      // 「こぼさないで なみだ」
+      p('G4',0.5),p('E4',0.5),p('D4',0.5),p('C4',0.5),p('B4',0.5),p('C4',1),p('B4',0.5),p('A4',0.5),p('A4',0.5),r(1),
+      // 「そうだ うれしいんだ 生きる喜び」
+      p('A4',0.5),p('D4',0.5),p('E4',0.5),p('D4',0.5),p('D4',0.5),p('E4',0.5),r(1),
+      p('G4',0.5),p('E4',0.5),p('F4',0.5),p('E4',0.5),p('D4',0.5),p('C4',0.5),
+      p('C4',0.5),p('C4',0.5),p('D4',0.5),p('E4',0.5),p('F4',1),
+      // 「たとえ むねの きずが いたくても」
+      p('E4',0.5),p('E4',0.5),p('D4',0.5),p('D4',0.5),r(0.5),
+      p('E4',0.5),p('E4',0.5),p('D4',0.5),p('C4',0.5),p('A4',0.5),r(1),
+      // 「なにが きみの しあわせ？」(繰り返し)
+      p('G4',0.5),p('G4',0.5),p('G4',0.5),p('G4',0.5),p('F4',0.5),p('E4',1),r(0.5),
+      p('C4',0.5),p('E4',0.5),p('D4',0.5),p('C4',0.5),p('D4',0.5),p('D4',1.5),r(1),
+      p('G4',0.5),p('E4',0.5),p('D4',0.5),p('C4',0.5),p('D4',0.5),p('D4',0.5),p('C4',1),r(1),
+      p('A4',0.5),p('A4',0.5),p('B4',0.5),p('C4',0.5),p('C4',0.5),p('D4',0.5),p('D4',0.5),p('E4',3),
+    ],
+    markers:[]
+  },
+  {
+    id:'hataraku', title:'はたらくくるま', artist:'キッズソング', category:'kids', bpm:120,
+    notes:[
+      // Aメロ（代表フレーズ）
+      p('C4'),p('C4'),p('C4',0.5),p('E4',0.5),p('G4'),p('E4'),
+      p('D4'),p('E4'),p('F4'),p('G4'),r(),
+      p('G4'),p('G4'),p('G4'),
+      p('A4'),p('A4'),p('A4',0.5),p('G4',0.5),p('G4'),p('G4',0.5),p('F4',0.5),p('E4'),p('D4'),
+      p('C4'),p('E4'),p('G4'),p('G4'),
+      p('A4'),p('A4',0.5),p('G4',0.5),p('F4'),p('E4',0.5),p('D4',0.5),p('C4'),
+      // Bメロ
+      p('C4'),p('C4'),p('C4',0.5),p('E4',0.5),p('G4'),p('G4',0.5),p('A4',0.5),p('G4'),r(),
+      p('A4'),p('G4',0.5),p('F4',0.5),p('E4'),r(),
+      p('G4'),p('G4'),p('G4'),
+      p('A4'),p('A4'),p('A4',0.5),p('G4',0.5),p('G4'),p('G4',0.5),p('F4',0.5),p('E4'),p('D4'),
+      p('C4'),p('E4'),p('G4',0.5),p('F4',0.5),p('E4'),p('D4',0.5),p('C4',0.5),
+    ],
+    markers:[]
+  },
+  {
+    id:'purin', title:'ポムポムプリンのうた', artist:'サンリオ', category:'kids', bpm:116,
+    notes:[
+      p('G4'),p('G4'),p('A4',0.5),p('G4',0.5),p('E4'),p('D4'),p('C4'),r(),
+      p('G4'),p('G4'),p('A4',0.5),p('G4',0.5),p('E4'),p('D4'),
+      p('C4'),p('D4'),p('E4'),p('G4'),p('A4'),p('G4'),r(),
+      p('E4'),p('G4'),p('A4'),p('G4'),p('E4'),r(),
+      p('C4'),p('E4'),p('G4'),p('E4'),p('D4'),p('C4'),
+      p('E4'),p('G4'),p('E4'),p('D4'),
+      p('C4'),p('C4'),p('D4'),p('E4'),p('G4'),p('A4'),p('G4'),p('E4'),p('D4'),p('C4'),
+      // repeat
+      p('G4'),p('G4'),p('A4',0.5),p('G4',0.5),p('E4'),p('D4'),p('C4'),r(),
+      p('G4'),p('G4'),p('A4',0.5),p('G4',0.5),p('E4'),p('D4'),
+      p('C4'),p('D4'),p('E4'),p('G4'),p('A4',2),r(2),
+    ],
+    markers:[]
+  },
+
+  // ─── HOLOLIVE ─── (要検証: AI近似データ)
+  {
+    id:'maribako', title:'まり箱', artist:'宝鐘マリン', category:'marine', bpm:120,
+    notes:[
+      // Aメロ
+      p('E4'),p('E4'),p('F4'),p('G4'),
+      p('G4'),p('F4'),p('E4'),p('D4'),
+      p('C4'),p('C4'),p('D4'),p('E4'),
+      p('E4',1.5),p('D4',0.5),p('D4',2),
+      p('E4'),p('G4'),p('A4'),p('G4'),
+      p('F4'),p('E4'),p('D4'),r(2),
+      p('C4'),p('E4'),p('G4'),p('A4'),
+      p('G4'),p('F4'),p('E4',2),
+      // Bメロ
+      p('D4'),p('E4'),p('F4'),p('G4'),
+      p('A4'),p('G4'),p('F4'),p('E4'),
+      p('D4'),p('C4'),r(2),
+      // サビ
+      p('E4'),p('G4'),p('A4'),p('B4'),
+      p('C5'),p('B4'),p('A4'),p('G4'),
+      p('E4'),p('G4'),p('A4'),p('B4'),
+      p('C5',2),r(2),
+      p('D4'),p('F4'),p('A4'),p('C5'),
+      p('B4'),p('A4'),p('G4'),p('F4'),
+      p('E4'),p('D4'),p('E4'),p('C4'),
+      p('C4',2),r(2),
+    ],
+    markers:[]
+  },
+  {
+    id:'creating_world', title:'Creating World', artist:'AZKi', category:'azki', bpm:80,
+    notes:[
+      // Aメロ
+      p('C4'),p('D4'),p('E4'),p('G4'),
+      p('G4',1.5),p('A4',0.5),p('G4',2),
+      p('E4'),p('F4'),p('E4'),p('D4'),
+      p('C4',2),r(2),
+      p('D4'),p('E4'),p('F4'),p('A4'),
+      p('A4',1.5),p('B4',0.5),p('A4',2),
+      p('G4'),p('A4'),p('G4'),p('F4'),
+      p('E4',2),r(2),
+      // サビ
+      p('E4'),p('G4'),p('A4'),p('C5'),
+      p('B4'),p('A4'),p('G4',2),
+      p('G4'),p('F4'),p('E4'),p('D4'),
+      p('C4',2),r(2),
+      p('D4'),p('F4'),p('A4'),p('C5'),
+      p('B4'),p('A4'),p('G4',2),
+      p('A4'),p('G4'),p('F4'),p('E4'),
+      p('D4'),p('C4'),r(4),
+      // サビ繰り返し
+      p('E4'),p('G4'),p('A4'),p('C5'),
+      p('B4'),p('A4'),p('G4',2),
+      p('G4'),p('F4'),p('E4'),p('D4'),
+      p('C4',4),
+    ],
+    markers:[]
+  },
+  {
+    id:'mogumogu', title:'もぐもぐYummy！', artist:'猫又おかゆ', category:'okayu', bpm:128,
+    notes:[
+      // Aメロ
+      p('C4'),p('C4'),p('D#4',0.5),p('C4',0.5),
+      p('A#3',1.5),r(0.5),p('C4'),r(),
+      p('D#4'),p('F4'),p('G4',1.5),r(0.5),
+      p('F4',0.5),p('D#4',0.5),p('C4'),r(),
+      p('C4'),p('C4'),p('D#4',0.5),p('C4',0.5),
+      p('A#3',1.5),r(0.5),p('G#3'),r(),
+      p('A#3'),p('C4'),p('D#4'),p('F4'),
+      p('G4',1.5),p('F4',0.5),p('D#4',2),
+      // サビ
+      p('G#4'),p('G4'),p('F4'),p('D#4'),
+      p('F4'),p('G4'),p('G#4',1.5),r(0.5),
+      p('A#4'),p('G#4'),p('G4'),p('F4'),
+      p('D#4',2),r(2),
+      p('G#4'),p('G4'),p('F4'),p('D#4'),
+      p('C4'),p('D#4'),p('F4'),p('G4'),
+      p('G#4'),p('G4'),p('F4'),p('D#4'),
+      p('C4',2),r(2),
+    ],
+    markers:[]
+  },
+  {
+    id:'sss', title:'SSS (Shiny Smily Story)', artist:'hololive', category:'hololive', bpm:168,
+    notes:[
+      // Aメロ
+      p('E4'),p('G4'),p('A4',0.5),p('G4',0.5),
+      p('E4'),p('D4'),p('C4',2),
+      p('E4'),p('D4'),p('C4',2),r(2),
+      // Bメロ
+      p('G4'),p('A4'),p('B4',0.5),p('A4',0.5),
+      p('G4'),p('F4'),p('E4',2),
+      p('D4'),p('E4'),p('F4'),p('G4'),
+      p('E4',1.5),r(0.5),p('C4',2),
+      // サビ
+      p('C4'),p('D4'),p('E4'),p('G4'),
+      p('A4'),p('G4'),p('A4'),p('B4'),
+      p('C5'),p('B4'),p('A4'),p('G4'),
+      p('E4',1.5),r(0.5),p('C4',2),
+      p('D4'),p('E4'),p('F4'),p('A4'),
+      p('G4'),p('F4'),p('E4'),p('D4'),
+      p('C4'),p('E4'),p('G4'),p('E4'),
+      p('C4',2),r(2),
+      // サビ繰り返し
+      p('C4'),p('D4'),p('E4'),p('G4'),
+      p('A4'),p('G4'),p('A4'),p('B4'),
+      p('C5'),p('B4'),p('A4'),p('G4'),
+      p('G4',2),p('C4',2),
+    ],
+    markers:[]
+  },
+  {
+    id:'q', title:'Q', artist:'Calliope & Gura', category:'hololive', bpm:178,
+    notes:[
+      // Aメロ
+      p('G4',1.5),r(0.5),p('G4'),p('A4'),
+      p('A#4'),p('A4'),p('G4',2),
+      p('F4'),p('G4'),p('A4'),p('A#4'),
+      p('A4'),p('G4'),p('F4',2),
+      // Bメロ
+      p('D#4'),p('F4'),p('G4'),p('G#4'),
+      p('G4'),p('F4'),p('D#4',2),
+      p('D4'),p('D#4'),p('F4'),p('G4'),
+      p('F4',1.5),r(0.5),p('D#4',2),
+      // サビ
+      p('G4',1.5),r(0.5),p('G4'),p('A#4'),
+      p('C5'),p('A#4'),p('G4',2),
+      p('F4'),p('D#4'),p('D4'),p('C4'),
+      p('A#3',2),r(2),
+      p('A#4'),p('A4'),p('G4'),p('F4'),
+      p('G4'),p('A4'),p('A#4',2),
+      p('C5'),p('A#4'),p('A4'),p('G4'),
+      p('F4'),p('D#4'),p('C4',2),
+      // サビ繰り返し
+      p('G4',1.5),r(0.5),p('G4'),p('A#4'),
+      p('C5'),p('A#4'),p('G4',2),
+      p('F4'),p('D#4'),p('D4'),p('C4'),
+      p('A#3',4),
+    ],
+    markers:[]
+  },
+];
+
+// =============================================
+// STATE
+// =============================================
+let currentSong = null;
+let mode = 'easy';
+let trackDir = 'north';
+
+// =============================================
+// UI
+// =============================================
+function onCat() {
+  const cat = document.getElementById('catSel').value;
+  const sel = document.getElementById('songSel');
+  sel.innerHTML = '<option value="">── 曲を選ぶ ──</option>';
+  SONGS.filter(s => s.category === cat).forEach(s => {
+    const o = document.createElement('option');
+    o.value = s.id;
+    o.textContent = s.title + (s.notes.length === 0 ? ' 🚧' : '');
+    sel.appendChild(o);
+  });
+}
+function onSong() {
+  stopPlay();
+  const id = document.getElementById('songSel').value;
+  currentSong = SONGS.find(s => s.id === id) || null;
+  render();
+}
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+  render();
+}
+function setDir(d) {
+  trackDir = d;
+  document.querySelectorAll('.dir-btn').forEach(b => b.classList.toggle('active', b.dataset.dir === d));
+  render();
+}
+function toggleLegend() {
+  const l = document.getElementById('legend');
+  l.style.display = l.style.display === 'none' ? 'block' : 'none';
+}
+
+// =============================================
+// AUDIO (Web Audio API — tap mat to hear pitch)
+// =============================================
+const FREQ = {
+  'C3':130.81,'C#3':138.59,'D3':146.83,'D#3':155.56,'E3':164.81,
+  'F3':174.61,'F#3':185.00,'G3':196.00,'G#3':207.65,'A3':220.00,
+  'A#3':233.08,'B3':246.94,
+  'C4':261.63,'C#4':277.18,'D4':293.66,'D#4':311.13,'E4':329.63,
+  'F4':349.23,'F#4':370.00,'G4':392.00,'G#4':415.30,'A4':440.00,
+  'A#4':466.16,'B4':493.88,
+  'C5':523.25,'C#5':554.37,
+};
+let _actx = null;
+function getActx() {
+  if (!_actx) _actx = new (window.AudioContext||window.webkitAudioContext)();
+  return _actx;
+}
+// オルゴール音：短いping、伸びない
+function playNote(pitch) {
+  if (!pitch) return;
+  try {
+    const ctx = getActx();
+    const f = FREQ[norm(pitch)];
+    if (!f) return;
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = 'triangle';
+    osc.frequency.value = f;
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(0.4, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+    osc.start(now); osc.stop(now + 0.32);
+  } catch(e){}
+}
+
+// =============================================
+// HELPERS
+// =============================================
+function norm(raw) {
+  if (!raw) return null;
+  return raw.toUpperCase()
+    .replace(/BB(\d)/g,'A#$1').replace(/EB(\d)/g,'D#$1')
+    .replace(/AB(\d)/g,'G#$1').replace(/DB(\d)/g,'C#$1')
+    .replace(/GB(\d)/g,'F#$1');
+}
+function rgba(hex, a) {
+  const rv=parseInt(hex.slice(1,3),16), gv=parseInt(hex.slice(3,5),16), bv=parseInt(hex.slice(5,7),16);
+  return `rgba(${rv},${gv},${bv},${a})`;
+}
+function relLabel(gameDir) {
+  return RELDIR[trackDir]?.[gameDir] || '';
+}
+function collectGroup(notes, start, max) {
+  const g = [];
+  let j = start;
+  while (g.length < max && j < notes.length && notes[j].p) {
+    g.push(notes[j]); j++;
+  }
+  return g;
+}
+
+// Direction → rotation angle for ♪ symbol
+// ゲーム絶対方角 → ♪回転角（線路=北向き基準）
+const DIRROT = {'南':0,'北':180,'西':-90,'東':90};
+// 線路方向ごとの補正角（画面上でどちらが「北」に見えるか）
+const TRACKROT = {north:0, south:180, east:90, west:-90};
+
+// 最終的な回転角 = ゲーム方角 + 線路方向補正
+function matRot(gameDir) {
+  const base = DIRROT[gameDir] ?? 0;
+  const adj  = TRACKROT[trackDir] ?? 0;
+  return base + adj;
+}
+
+// =============================================
+// STEP BUILDER (ガチ/超ガチ)
+// =============================================
+/*
+ * 各センサーを自己完結ブロックで表現。
+ * 3マットは前(進行方向側)/横(線路と逆)/後(スタート側)。
+ * 列: 0=extraL 1=farL 2=closeL 3=TRACK 4=closeR 5=farR 6=extraR
+ */
+function buildGachiGrid(notes) {
+  const steps = [];
+  let i = 0, sIdx = 0;
+  while (i < notes.length) {
+    if (!notes[i].p) {
+      steps.push({ type:'rest' });
+      i++; continue;
+    }
+    const g = collectGroup(notes, i, 3);
+    const mk = (x, sn) => { const n=norm(x.p); return {note:n, info:NM[n], sNum:sn}; };
+    const sn = sIdx + 1;
+    steps.push({
+      type:'sensor', pos:POS_CYCLE[sIdx%4], sNum:sn, rowType:'sensor',
+      mats: g.map(x=>mk(x,sn)),
+      plays: g.map(x=>norm(x.p)).filter(Boolean).join(',')
+    });
+    sIdx++;
+    i += g.length;
+  }
+
+  // Spread mats into grid cells (same logic as before)
+  const N = steps.length;
+  const grid = steps.map(s=>({
+    rowType:s.type, cells:Array(7).fill(null),
+    plays:s.plays||'', sNum:s.sNum||null
+  }));
+
+  steps.forEach((step,r)=>{
+    if(step.type!=='sensor') return;
+    const sCol=SENSOR_COL[step.pos], fCol=FAR_COL[step.pos];
+    const {sNum,mats}=step;
+    grid[r].cells[sCol]={type:'sdot',sNum};
+    if(mats[0]) grid[r].cells[fCol]={type:'mat',...mats[0]};
+    if(mats[1]&&r>0&&!grid[r-1].cells[sCol])
+      grid[r-1].cells[sCol]={type:'mat',...mats[1]};
+    if(mats[2]&&r<N-1&&!grid[r+1].cells[sCol])
+      grid[r+1].cells[sCol]={type:'mat',...mats[2]};
+  });
+
+  return grid;
+}
+
+// =============================================
+// HTML GENERATORS
+// =============================================
+function matTileHTML(cell, mini=false) {
+  if (!cell || cell.type !== 'mat') return '';
+  const info = cell.info;
+  if (!info) return `<div class="mt"><span class="nsym" style="transform:rotate(0deg)">♪</span></div>`;
+  const col = MC[info.mat] || '#444';
+  const rot = matRot(info.dir);
+  const snAttr = cell.sNum ? ` data-sensor="${cell.sNum}"` : '';
+  return `<div class="mt"${snAttr}
+    style="background:${rgba(col,.85)};border-color:${col}">
+    <span class="nsym" style="transform:rotate(${rot}deg)">♪</span>
+  </div>`;
+}
+
+function sensorDotHTML(cell) {
+  if (!cell || cell.type !== 'sdot') return '';
+  return `<div class="sdot">S${cell.sNum}</div>`;
+}
+
+function cellHTML(cell, mini=false) {
+  if (!cell) return '';
+  if (cell.type === 'sdot') return sensorDotHTML(cell);
+  return matTileHTML(cell, mini);
+}
+
+// Build one map-row div from grid row data
+function gridRowHTML(row) {
+  const c = row.cells;
+  const playsAttr = row.plays ? ` data-plays="${row.plays}"` : '';
+  const snumAttr  = row.sNum  ? ` data-snum="${row.sNum}"`   : '';
+  return `<div class="map-row"${playsAttr}${snumAttr}>
+    <div style="grid-column:1;display:flex;align-items:center;justify-content:center">${cellHTML(c[0])}</div>
+    <div style="grid-column:2;display:flex;align-items:center;justify-content:center">${cellHTML(c[1])}</div>
+    <div style="grid-column:3;display:flex;align-items:center;justify-content:center">${cellHTML(c[2])}</div>
+    <div class="tc" style="grid-column:4"></div>
+    <div style="grid-column:5;display:flex;align-items:center;justify-content:center">${cellHTML(c[4])}</div>
+    <div style="grid-column:6;display:flex;align-items:center;justify-content:center">${cellHTML(c[5])}</div>
+    <div style="grid-column:7;display:flex;align-items:center;justify-content:center">${cellHTML(c[6])}</div>
+  </div>`;
+}
+
+// =============================================
+// RENDER
+// =============================================
+function render() {
+  const mapEl     = document.getElementById('map');
+  const emptyEl   = document.getElementById('empty');
+  const summaryEl = document.getElementById('summary');
+  const mapCol    = document.getElementById('mapcol');
+
+  if (!currentSong) {
+    emptyEl.style.display = 'flex';
+    summaryEl.style.display = 'none';
+    mapCol.innerHTML = '';
+    ['st-step','st-note','st-sens'].forEach(id => document.getElementById(id).textContent = '–');
+    return;
+  }
+  if (currentSong.notes.length === 0) {
+    emptyEl.innerHTML = `<div class="ico">🚧</div><div style="font-weight:700">${currentSong.title}</div>
+      <div style="font-size:.75rem">音符データ準備中です</div>`;
+    emptyEl.style.display = 'flex';
+    summaryEl.style.display = 'none';
+    mapCol.innerHTML = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  const notes = currentSong.notes;
+  const noteCount = notes.filter(n => n.p).length;
+
+  // ── MAT COUNT SUMMARY ──
+  const counts = {};
+  notes.filter(n => n.p).forEach(n => {
+    const k = norm(n.p);
+    const info = NM[k];
+    if (info) counts[info.mat] = (counts[info.mat] || 0) + 1;
+  });
+  const sorted = Object.entries(counts).sort((a,b) => MAT_ORDER.indexOf(a[0])-MAT_ORDER.indexOf(b[0]));
+  summaryEl.style.display = 'block';
+  summaryEl.innerHTML = `<h3>必要なマット数（合計）</h3><div class="chips">
+    ${sorted.map(([mat,cnt]) => {
+      const col = MC[mat]||'#555';
+      return `<div class="chip" style="border-color:${col};background:${rgba(col,.15)}">
+        <div class="chip-dot" style="background:${col}"></div>
+        <span style="color:${col}">${mat}</span>
+        <span>×${cnt}</span></div>`;
+    }).join('')}</div>`;
+
+  // ── RENDER MAP ──
+  // d値を8分音符単位のマス数に変換（BASE=0.5=8分音符=1マス）
+  const BASE_D = 0.5;
+  const toSteps = d => Math.max(1, Math.round((d || 1) / BASE_D));
+
+  let html = '';
+
+  if (mode === 'easy') {
+    // 各音符 → マットタイル + 空きマス(d値で決まる間隔)
+    let matCount = 0;
+    const stepRows = []; // 展開済みの行リスト
+    notes.forEach(note => {
+      const steps = toSteps(note.d);
+      if (note.p) {
+        matCount++;
+        const n = norm(note.p);
+        const info = NM[n];
+        const col = info ? MC[info.mat] : '#444';
+        const rot = matRot(info?.dir);
+        // 1行目: マットタイル
+        stepRows.push({type:'note', n, col, rot});
+        // 残り(steps-1)行: 空き（間隔）
+        for (let s = 1; s < steps; s++) stepRows.push({type:'gap'});
+      } else {
+        // 休符: steps行すべて空き
+        for (let s = 0; s < steps; s++) stepRows.push({type:'gap'});
+      }
+    });
+
+    document.getElementById('st-step').textContent = matCount;
+    document.getElementById('st-note').textContent  = noteCount;
+    document.getElementById('st-sens').textContent  = '–';
+
+    html += `<div class="bmark goal">🏁 GOAL</div>`;
+    html += `<div style="display:flex;flex-direction:column;align-items:center;">`;
+    [...stepRows].reverse().forEach(row => {
+      if (row.type === 'note') {
+        html += `<div class="easy-row" data-plays="${row.n}">
+          <div class="easy-mat" style="background:${rgba(row.col,.85)};border-color:${row.col}">
+            <span class="nsym" style="transform:rotate(${row.rot}deg)">♪</span>
+          </div>
+        </div>`;
+      } else {
+        html += `<div class="easy-gap"></div>`;
+      }
+    });
+    html += `</div>`;
+    html += `<div class="bmark start">▶ START</div>`;
+
+  } else {
+    // ガチ / 超ガチ: 7列グリッド
+    const gridRows = buildGachiGrid(notes);
+    const sensorCount = gridRows.filter(r => r.rowType === 'sensor').length;
+
+    document.getElementById('st-step').textContent = sensorCount;
+    document.getElementById('st-note').textContent  = noteCount;
+    document.getElementById('st-sens').textContent  = sensorCount;
+
+    html += `<div class="bmark goal">🏁 GOAL</div>`;
+    html += `<div class="col-hdr">
+      <span>③外</span><span>③遠</span><span>①近</span><span>線路</span>
+      <span>②近</span><span>④遠</span><span>④外</span>
+    </div>`;
+
+    [...gridRows].reverse().forEach(row => {
+      if (row.rowType === 'rest') {
+        // 休符行: 線路のみ表示
+        html += `<div class="map-row"><div class="tc"></div></div>`;
+      } else {
+        html += gridRowHTML(row);
+      }
+    });
+
+    html += `<div class="bmark start">▶ START</div>`;
+  }
+
+  mapCol.innerHTML = html;
+
+  // Build legend
+  const legendMats = document.getElementById('legend-mats');
+  legendMats.innerHTML = MAT_ORDER.map(mat => {
+    const col = MC[mat]||'#555';
+    return `<div class="legend-item">
+      <div class="l-swatch" style="background:${col}"></div>
+      <span>${mat}マット</span></div>`;
+  }).join('');
+
+  // Scroll to bottom (START)
+  setTimeout(() => {
+    mapEl.scrollTop = mapEl.scrollHeight;
+    setupScrollPlay();
+  }, 80);
+}
+
+// =============================================
+// PLAYBACK (auto-scroll + audio + flash)
+// =============================================
+let _observer = null;
+let _rafId    = null;
+let _isPlaying = false;
+
+const FLASH_MS = 200;
+function triggerStep(el) {
+  if (!el) return;
+  if (el.dataset.plays) {
+    el.dataset.plays.split(',').forEach(p => playNote(p.trim()));
+  }
+  const sNum = el.dataset.snum;
+  if (sNum) {
+    document.querySelectorAll(`[data-sensor="${sNum}"]`).forEach(m => {
+      m.classList.add('mat-flash');
+      setTimeout(() => m.classList.remove('mat-flash'), FLASH_MS);
+    });
+  } else {
+    const em = el.querySelector('.easy-mat') || el;
+    em.classList.add('mat-flash');
+    setTimeout(() => em.classList.remove('mat-flash'), FLASH_MS);
+  }
+}
+
+function togglePlay() {
+  _isPlaying ? stopPlay() : startPlay();
+}
+
+function startPlay() {
+  if (!currentSong || !currentSong.notes.length) return;
+  stopPlay();
+
+  const bpm    = currentSong.bpm || 120;
+  const BASE_D = 0.5;                        // 8分音符 = 1マス
+  const CELL   = 44;                         // CSS --cell と同じ px
+  const stepMs = 60000 / bpm * BASE_D;       // 1マスあたりの時間(ms)
+  const pxPerMs = CELL / stepMs;             // スクロール速度(px/ms)
+
+  const mapEl = document.getElementById('map');
+  mapEl.scrollTop = mapEl.scrollHeight;
+
+  _isPlaying = true;
+  document.getElementById('play-btn').textContent = '⏹ 停止';
+
+  // requestAnimationFrame で等速スクロール
+  // 音はIntersectionObserverが検知して鳴らす（手動・自動共通）
+  let t0 = null;
+  const startTop = mapEl.scrollHeight - mapEl.clientHeight;
+
+  function raf(ts) {
+    if (!_isPlaying) return;
+    if (t0 === null) t0 = ts;
+    const elapsed = ts - t0;
+    const newTop = startTop - elapsed * pxPerMs;
+    mapEl.scrollTop = Math.max(0, newTop);
+    if (newTop > 0) {
+      _rafId = requestAnimationFrame(raf);
+    } else {
+      stopPlay();
+    }
+  }
+  _rafId = requestAnimationFrame(raf);
+}
+
+function stopPlay() {
+  if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+  _isPlaying = false;
+  const btn = document.getElementById('play-btn');
+  if (btn) btn.textContent = '▶ 再生';
+}
+
+// Manual scroll: IntersectionObserver fires when row crosses center
+function setupScrollPlay() {
+  if (_observer) { _observer.disconnect(); _observer = null; }
+  const mapEl = document.getElementById('map');
+  const targets = mapEl.querySelectorAll('[data-plays]');
+  if (!targets.length) return;
+
+  // 手動スクロールも自動再生も同じObserverで音を鳴らす
+  _observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      triggerStep(entry.target);
+    });
+  }, {
+    root: mapEl,
+    rootMargin: '-46% 0px -46% 0px',
+    threshold: 0
+  });
+
+  targets.forEach(el => _observer.observe(el));
+}
+
+render();
+</script>
+</body>
+</html>
