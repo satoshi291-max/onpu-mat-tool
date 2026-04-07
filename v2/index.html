@@ -154,6 +154,18 @@ select option{background:var(--card);}
   text-shadow:0 1px 4px rgba(0,0,0,.8);display:block;
 }
 
+/* ── NOW PLAYING HUD ── */
+#now-hud{
+  position:absolute;left:8px;top:8px;z-index:30;
+  background:rgba(8,8,15,.82);border:1px solid var(--accent);
+  border-radius:8px;padding:5px 10px;font-size:.7rem;
+  display:none;pointer-events:none;
+  backdrop-filter:blur(4px);
+}
+#now-hud.visible{display:block;}
+#now-hud .now-step{font-weight:800;color:var(--accent);}
+#now-hud .now-pitch{color:var(--gold);font-size:.85rem;font-weight:800;}
+
 /* trigger line overlay on #map */
 #trigger-line{
   position:absolute;left:0;right:0;top:50%;
@@ -306,6 +318,10 @@ select option{background:var(--card);}
 <!-- MAP -->
 <div id="map">
   <div id="trigger-line"></div>
+  <div id="now-hud">
+    <div class="now-pitch" id="now-pitch">–</div>
+    <div class="now-step" id="now-step">–</div>
+  </div>
   <div id="empty"><div class="ico">🎵</div><div>カテゴリと曲を選んでください</div></div>
   <div id="summary" style="display:none"></div>
   <div id="mapcol"></div>
@@ -935,11 +951,14 @@ function render() {
     document.getElementById('st-note').textContent  = noteCount;
     document.getElementById('st-sens').textContent  = '–';
 
+    html += `<div style="height:50vh;flex-shrink:0;"></div>`;
     html += `<div class="bmark goal">🏁 GOAL</div>`;
     html += `<div style="display:flex;flex-direction:column;align-items:center;">`;
+    let easyStep = 0;
     [...stepRows].reverse().forEach(row => {
       if (row.type === 'note') {
-        html += `<div class="easy-row" data-plays="${row.n}">
+        easyStep++;
+        html += `<div class="easy-row" data-plays="${row.n}" data-step="${easyStep}">
           <div class="easy-mat" style="background:${rgba(row.col,.85)};border-color:${row.col}">
             <span class="nsym" style="transform:rotate(${row.rot}deg)">♪</span>
           </div>
@@ -950,6 +969,7 @@ function render() {
     });
     html += `</div>`;
     html += `<div class="bmark start">▶ START</div>`;
+    html += `<div style="height:50vh;flex-shrink:0;"></div>`;
 
   } else {
     // ガチ / 超ガチ: 7列グリッド
@@ -960,22 +980,26 @@ function render() {
     document.getElementById('st-note').textContent  = noteCount;
     document.getElementById('st-sens').textContent  = sensorCount;
 
+    html += `<div style="height:50vh;flex-shrink:0;"></div>`;
     html += `<div class="bmark goal">🏁 GOAL</div>`;
     html += `<div class="col-hdr">
       <span>③外</span><span>③遠</span><span>①近</span><span>線路</span>
       <span>②近</span><span>④遠</span><span>④外</span>
     </div>`;
 
+    let gachiStep = 0;
     [...gridRows].reverse().forEach(row => {
       if (row.rowType === 'rest') {
-        // 休符行: 線路のみ表示
         html += `<div class="map-row"><div class="tc"></div></div>`;
       } else {
-        html += gridRowHTML(row);
+        gachiStep++;
+        const rowHtml = gridRowHTML(row).replace('<div class="map-row"', `<div class="map-row" data-step="${gachiStep}"`);
+        html += rowHtml;
       }
     });
 
     html += `<div class="bmark start">▶ START</div>`;
+    html += `<div style="height:50vh;flex-shrink:0;"></div>`;
   }
 
   mapCol.innerHTML = html;
@@ -1006,6 +1030,23 @@ let _isPlaying = false;
 const FLASH_MS = 200;
 function triggerStep(el) {
   if (!el) return;
+
+  // ── HUD 更新 ──
+  const pitches = el.dataset.plays ? el.dataset.plays.split(',').map(s=>s.trim()) : [];
+  const stepNum = el.dataset.step || el.closest('[data-step]')?.dataset.step;
+  const totalSteps = document.querySelectorAll('[data-step]').length;
+  const hud = document.getElementById('now-hud');
+  if (pitches.length) {
+    // 音名を日本語表記に変換
+    const pitchNames = pitches.map(p => {
+      const nm = NM[norm(p)];
+      return nm ? nm.name + (nm.dir !== '↓' ? nm.dir : '') : p;
+    });
+    document.getElementById('now-pitch').textContent = pitchNames.join(' + ');
+    document.getElementById('now-step').textContent  = stepNum ? `${stepNum} / ${totalSteps}` : '';
+    hud.classList.add('visible');
+  }
+
   if (el.dataset.plays) {
     el.dataset.plays.split(',').forEach(p => playNote(p.trim()));
   }
@@ -1067,6 +1108,7 @@ function stopPlay() {
   _isPlaying = false;
   const btn = document.getElementById('play-btn');
   if (btn) btn.textContent = '▶ 再生';
+  document.getElementById('now-hud').classList.remove('visible');
 }
 
 // Manual scroll: IntersectionObserver fires when row crosses center
