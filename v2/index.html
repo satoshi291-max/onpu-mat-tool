@@ -165,6 +165,34 @@ select option{background:var(--card);}
   font-size:.6rem;color:rgba(124,77,255,.6);
 }
 
+/* ── MIDI MODAL ── */
+#midi-fab{position:fixed;bottom:68px;right:16px;
+  width:42px;height:42px;border-radius:50%;
+  background:#1a3a1a;border:2px solid #2ecc71;color:#2ecc71;
+  font-size:1rem;cursor:pointer;z-index:100;
+  box-shadow:0 2px 12px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;}
+#midi-modal{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;
+  display:none;align-items:center;justify-content:center;padding:16px;}
+#midi-modal.open{display:flex;}
+#midi-box{background:var(--surf);border:1px solid var(--border);border-radius:14px;
+  padding:18px;width:100%;max-width:340px;display:flex;flex-direction:column;gap:10px;}
+#midi-box h3{font-size:.85rem;font-weight:800;color:var(--text);margin:0;}
+#midi-drop{border:2px dashed var(--border);border-radius:10px;padding:20px;
+  text-align:center;font-size:.78rem;color:var(--muted);cursor:pointer;
+  transition:.2s;min-height:70px;display:flex;align-items:center;justify-content:center;}
+#midi-drop.drag-over{border-color:var(--accent);color:var(--accent);background:#150a2a;}
+#midi-drop.loaded{border-color:#2ecc71;color:#2ecc71;background:#081a08;}
+#midi-meta{display:flex;gap:8px;}
+#midi-meta input{flex:1;background:var(--card);border:1px solid var(--border);
+  border-radius:6px;color:var(--text);padding:6px 8px;font-size:.78rem;}
+#midi-meta input::placeholder{color:var(--muted);}
+#midi-actions{display:flex;gap:8px;}
+#midi-actions button{flex:1;padding:8px;border-radius:8px;border:none;
+  font-size:.78rem;font-weight:700;cursor:pointer;}
+#midi-ok{background:var(--accent);color:#fff;}
+#midi-cancel{background:var(--card);color:var(--muted);}
+#midi-log{font-size:.65rem;color:var(--muted);max-height:60px;overflow-y:auto;white-space:pre-wrap;}
+
 /* ── LEGEND ── */
 #legend-toggle{position:fixed;bottom:16px;right:16px;
   width:42px;height:42px;border-radius:50%;
@@ -245,6 +273,33 @@ select option{background:var(--card);}
         color:#fff;font-size:.78rem;font-weight:700;padding:5px 12px;cursor:pointer;">
       ▶ 再生
     </button>
+  </div>
+</div>
+
+<!-- MIDI FAB -->
+<button id="midi-fab" onclick="openMidiModal()" title="MIDIファイルを読み込む">♪+</button>
+
+<!-- MIDI MODAL -->
+<div id="midi-modal">
+  <div id="midi-box">
+    <h3>MIDIファイルを追加</h3>
+    <div id="midi-drop" onclick="document.getElementById('midi-file').click()"
+         ondragover="event.preventDefault();this.classList.add('drag-over')"
+         ondragleave="this.classList.remove('drag-over')"
+         ondrop="onMidiDrop(event)">
+      <span id="midi-drop-label">ここにMIDIをドロップ<br>またはタップして選択</span>
+      <input id="midi-file" type="file" accept=".mid,.midi" style="display:none"
+             onchange="onMidiFile(this.files[0])">
+    </div>
+    <div id="midi-meta">
+      <input id="midi-title" placeholder="曲名" style="flex:2">
+      <input id="midi-bpm" placeholder="BPM" type="number" min="40" max="300" value="120" style="flex:1">
+    </div>
+    <div id="midi-log"></div>
+    <div id="midi-actions">
+      <button id="midi-ok" onclick="addMidiSong()" disabled>追加</button>
+      <button id="midi-cancel" onclick="closeMidiModal()">キャンセル</button>
+    </div>
   </div>
 </div>
 
@@ -1037,6 +1092,208 @@ function setupScrollPlay() {
 }
 
 render();
+
+// =============================================
+// MIDI IMPORT
+// =============================================
+let _midiNotes = null;  // 解析済みノート配列
+
+function openMidiModal() {
+  document.getElementById('midi-modal').classList.add('open');
+}
+function closeMidiModal() {
+  document.getElementById('midi-modal').classList.remove('open');
+  _midiNotes = null;
+  document.getElementById('midi-ok').disabled = true;
+  document.getElementById('midi-drop').className = 'midi-drop';
+  document.getElementById('midi-drop-label').innerHTML = 'ここにMIDIをドロップ<br>またはタップして選択';
+  document.getElementById('midi-log').textContent = '';
+}
+function onMidiDrop(e) {
+  e.preventDefault();
+  const el = document.getElementById('midi-drop');
+  el.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) onMidiFile(file);
+}
+function onMidiFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const buf = e.target.result;
+      const result = parseMidi(new Uint8Array(buf));
+      _midiNotes = result.notes;
+      const log = document.getElementById('midi-log');
+      log.textContent = `✓ ${result.noteCount}音符 / BPM: ${result.bpm}`;
+      document.getElementById('midi-bpm').value = result.bpm || 120;
+      const dropEl = document.getElementById('midi-drop');
+      dropEl.classList.add('loaded');
+      document.getElementById('midi-drop-label').textContent = file.name;
+      if (!document.getElementById('midi-title').value) {
+        document.getElementById('midi-title').value = file.name.replace(/\.midi?$/i, '');
+      }
+      document.getElementById('midi-ok').disabled = false;
+    } catch(err) {
+      document.getElementById('midi-log').textContent = '解析エラー: ' + err.message;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+function addMidiSong() {
+  if (!_midiNotes) return;
+  const title = document.getElementById('midi-title').value || 'MIDIインポート';
+  const bpm   = parseInt(document.getElementById('midi-bpm').value) || 120;
+  const id    = 'midi_' + Date.now();
+  const song = { id, title, artist: 'インポート', category: 'other', bpm, notes: _midiNotes, markers: [] };
+  SONGS.push(song);
+  // カテゴリセレクタに「その他」が未選択なら追加
+  const catSel = document.getElementById('catSel');
+  catSel.value = 'other';
+  onCat();
+  const songSel = document.getElementById('songSel');
+  songSel.value = id;
+  onSong();
+  closeMidiModal();
+}
+
+// ── MIDI バイナリパーサー ──
+function parseMidi(bytes) {
+  let pos = 0;
+  function read(n) { const s = pos; pos += n; return bytes.slice(s, pos); }
+  function u16(b) { return (b[0]<<8)|b[1]; }
+  function u32(b) { return (b[0]<<24)|(b[1]<<16)|(b[2]<<8)|b[3]; }
+  function varlen() {
+    let v = 0;
+    for (let i = 0; i < 4; i++) {
+      const b = bytes[pos++];
+      v = (v << 7) | (b & 0x7f);
+      if (!(b & 0x80)) break;
+    }
+    return v;
+  }
+
+  // Header
+  pos = 0;
+  const hType = String.fromCharCode(...read(4));
+  if (hType !== 'MThd') throw new Error('MIDIヘッダーが見つかりません');
+  read(4); // length
+  const fmt    = u16(read(2));
+  const nTrk   = u16(read(2));
+  const divRaw = u16(read(2));
+  const tpb    = divRaw & 0x7fff; // ticks per beat
+
+  // テンポ検索 + 全ノート収集
+  let tempo = 500000;
+  const allNotes = []; // {start, end, pitch, track}
+
+  for (let ti = 0; ti < nTrk; ti++) {
+    const tType = String.fromCharCode(...read(4));
+    const tLen  = u32(read(4));
+    const tEnd  = pos + tLen;
+    let abs = 0;
+    const active = {};
+    let status = 0;
+
+    while (pos < tEnd) {
+      const dt = varlen();
+      abs += dt;
+
+      let b = bytes[pos];
+      if (b & 0x80) { status = b; pos++; }
+      const type = (status >> 4) & 0xf;
+      const ch   = status & 0xf;
+
+      if (status === 0xff) {
+        // Meta event
+        const meta = bytes[pos++];
+        const mlen = varlen();
+        if (meta === 0x51 && mlen === 3) {
+          // Set Tempo
+          tempo = (bytes[pos]<<16)|(bytes[pos+1]<<8)|bytes[pos+2];
+        }
+        pos += mlen;
+      } else if (status === 0xf0 || status === 0xf7) {
+        // Sysex
+        const slen = varlen();
+        pos += slen;
+      } else if (type === 9 || type === 8) {
+        // Note on / Note off
+        const pitch = bytes[pos++];
+        const vel   = bytes[pos++];
+        const on = (type === 9 && vel > 0);
+        if (on) {
+          active[pitch] = abs;
+        } else {
+          if (pitch in active) {
+            allNotes.push({start: active[pitch], end: abs, pitch, track: ti});
+            delete active[pitch];
+          }
+        }
+      } else if (type === 0xa) { pos += 2; } // Aftertouch
+      else if (type === 0xb) { pos += 2; } // CC
+      else if (type === 0xc) { pos += 1; } // Program change
+      else if (type === 0xd) { pos += 1; } // Channel pressure
+      else if (type === 0xe) { pos += 2; } // Pitch bend
+      else { pos++; } // unknown
+    }
+    pos = tEnd;
+  }
+
+  if (!allNotes.length) throw new Error('音符が見つかりません');
+
+  const bpm = Math.round(60000000 / tempo);
+
+  // 同時発音（±WINDOW tick）でグループ化、最高音を選択
+  allNotes.sort((a, b) => a.start - b.start);
+  const WINDOW = Math.max(20, Math.round(tpb / 8));
+  const groups = [];
+  let i = 0;
+  while (i < allNotes.length) {
+    const s0 = allNotes[i].start;
+    let best = allNotes[i];
+    let j = i + 1;
+    while (j < allNotes.length && allNotes[j].start - s0 <= WINDOW) {
+      if (allNotes[j].pitch > best.pitch) best = allNotes[j];
+      j++;
+    }
+    groups.push(best);
+    i = j;
+  }
+
+  // ticks → d値（8分音符=0.5）
+  const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const gameRange = (n) => {
+    let oct = Math.floor(n / 12) - 1;
+    const base = NOTE_NAMES[n % 12];
+    while (oct > 4 || (oct === 5 && !['C','C#'].includes(base))) oct--;
+    while (oct < 3) oct++;
+    return `${base}${oct}`;
+  };
+
+  const eighth = tpb * 0.5;
+  const notes = [];
+  let prevEnd = 0;
+
+  for (const g of groups) {
+    // 休符
+    const gap = g.start - prevEnd;
+    if (gap > eighth * 0.7) {
+      const rd = Math.max(0.5, Math.round(gap / tpb * 2) * 0.5);
+      if (notes.length && notes[notes.length-1].p === null) {
+        notes[notes.length-1].d = Math.round((notes[notes.length-1].d + rd) * 10) / 10;
+      } else {
+        notes.push({p: null, d: rd});
+      }
+    }
+    const dur = g.end - g.start;
+    const d   = Math.max(0.5, Math.round(dur / tpb * 2) * 0.5);
+    notes.push({p: gameRange(g.pitch), d});
+    prevEnd = g.end;
+  }
+
+  return {notes, bpm, noteCount: notes.length};
+}
 </script>
 </body>
 </html>
